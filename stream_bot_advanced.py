@@ -80,26 +80,54 @@ class StreamConfig:
         self.start_time = datetime.now()
 
     def get_ffmpeg_command(self) -> list:
-        """Генерує команду FFmpeg"""
-        return [
+        """Генерує команду FFmpeg (Виправлена версія)"""
+        cmd = [
             FFMPEG_PATH,
-            '-re',
-            '-i', self.stream_url,
+            '-hide_banner',
+            '-loglevel', 'error',
+            # --- БЛОК 1: Налаштування вхідного потоку ---
+            # Для онлайн потоків (m3u8/rtsp) прибираємо '-re', бо вони і так йдуть в реальному часі.
+            # Якщо ви стрімите локальний файл mp4, то розкоментуйте '-re'.
+            # '-re',
+
+            # Налаштування реконнекту (щоб стрім не падав при мікро-розривах)
+            '-reconnect', '1',
+            '-reconnect_at_eof', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-timeout', '10000000',  # Таймаут сокета (10 сек)
+
+            '-i', self.stream_url,  # Вхід 0: Відео
+
             '-f', 'lavfi',
-            '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+            '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',  # Вхід 1: Тиша
+
+            # --- БЛОК 2: Відео кодування ---
+            '-map', '0:v:0',  # Явно беремо відео з першого входу
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-tune', 'zerolatency',
-            '-pix_fmt', 'yuv420p',
-            '-g', '25',
-            '-vf', 'scale=1280:720,format=yuv420p,colorspace=all=bt709:range=tv,fps=25',
+            '-preset', 'veryfast',  # Швидкий пресет, щоб не вантажити CPU
+            '-tune', 'zerolatency',  # Мінімальна затримка
+            '-pix_fmt', 'yuv420p',  # Обов'язково для Telegram
+            '-g', '50',  # Keyframe кожні 2 секунди (25fps * 2). Telegram любить 2-4 сек.
+            '-keyint_min', '50',
+            '-sc_threshold', '0',  # Вимикаємо визначення сцени для стабільного бітрейту
+
+            # Фільтри: Масштабування до 720p (стандарт Telegram) + обмеження FPS
+            '-vf',
+            'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p,fps=25',
+
+            # --- БЛОК 3: Аудіо кодування ---
+            '-map', '1:a:0',  # Явно беремо аудіо з генератора тиші (Вхід 1)
             '-c:a', 'aac',
             '-b:a', '128k',
             '-ac', '2',
-            '-shortest',
+            '-ar', '44100',
+
+            # --- БЛОК 4: Вихід ---
             '-f', 'flv',
             self.rtmp_url
         ]
+        return cmd
 
     def to_dict(self) -> dict:
         """Конвертує конфігурацію в словник"""
@@ -480,7 +508,7 @@ async def monitor_stream(user_id: int, stream_id: str, process: subprocess.Popen
     """Асинхронний моніторинг процесу трансляції"""
     while True:
         await asyncio.sleep(5)
-        
+
         poll = process.poll()
         if poll is not None:
             # Процес завершився
@@ -490,7 +518,7 @@ async def monitor_stream(user_id: int, stream_id: str, process: subprocess.Popen
                 del active_streams[user_id][stream_id]
             else:
                 uptime = None
-            
+
             try:
                 if poll == 0:
                     await bot.send_message(
@@ -510,7 +538,7 @@ async def monitor_stream(user_id: int, stream_id: str, process: subprocess.Popen
                     )
             except Exception as e:
                 logger.error(f"Помилка відправки повідомлення: {e}")
-            
+
             break
 
 async def on_shutdown():
