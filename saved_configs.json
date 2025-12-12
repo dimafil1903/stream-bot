@@ -1,0 +1,9 @@
+{
+  "481629579": [
+    {
+      "name": "WEBCAM",
+      "stream_url": "https://eu2.camflg.com:5443/LiveApp/streams/bukovel8.m3u8",
+      "rtmp_url": "rtmps://dc4-1.rtmp.t.me/s/1424308297:1gKBAQ5k0MYZTWw6w9HCkg"
+    }
+  ]
+}
